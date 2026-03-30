@@ -91,14 +91,17 @@ def score_song(user_prefs: Dict, song: Dict) -> float:
     Scores a single song against a user's preferences.
     Returns a float between 0.0 and 5.0.
     """
-    energy_score = 1 - abs(user_prefs["target_energy"] - song["energy"])
+    # EXPERIMENT (Step 3): doubled energy weight, halved genre weight.
+    # Original: energy×1, genre bonus 2.0. New: energy×2, genre bonus 1.0.
+    # Total max remains 5.0 (2.0 + 1.0 + 1.0 + 1.0).
+    energy_score = 2 * (1 - abs(user_prefs["target_energy"] - song["energy"]))
 
     if user_prefs["likes_acoustic"]:
         acoustic_score = song["acousticness"]
     else:
         acoustic_score = 1 - song["acousticness"]
 
-    genre_bonus = 2.0 if song["genre"] == user_prefs["favorite_genre"] else 0.0
+    genre_bonus = 1.0 if song["genre"] == user_prefs["favorite_genre"] else 0.0
     mood_bonus  = 1.0 if song["mood"]  == user_prefs["favorite_mood"]  else 0.0
 
     return energy_score + acoustic_score + genre_bonus + mood_bonus

@@ -11,7 +11,7 @@ Your goal is to:
 - Evaluate what your system gets right and wrong
 - Reflect on how this mirrors real world AI recommenders
 
-Replace this paragraph with your own summary of what your version does.
+VibeFinder 1.0 scores every song in a 20-song catalog against a user's stated preferences — favorite genre, mood, target energy, and acoustic preference — and returns the top 5 matches. The system was stress-tested against four profiles including an adversarial "High-Energy Sad Blues" edge case that revealed a genre-lock bias in the scoring logic. A weight-shift experiment (doubled energy, halved genre bonus) was applied to study how sensitive the rankings are to each feature's relative importance.
 
 ---
 
@@ -114,25 +114,41 @@ You can add more tests in `tests/test_recommender.py`.
 
 ## Experiments You Tried
 
-Use this section to document the experiments you ran. For example:
+Full terminal output for all runs is captured in [results.md](results.md).
 
-- What happened when you changed the weight on genre from 2.0 to 0.5
-- What happened when you added tempo or valence to the score
-- How did your system behave for different types of users
+### Profiles tested
+
+Four user profiles were run against the recommender:
+
+| Profile | genre | mood | energy | acoustic |
+|---|---|---|---|---|
+| High-Energy Pop | pop | happy | 0.9 | False |
+| Chill Lofi | lofi | chill | 0.35 | True |
+| Deep Intense Rock | rock | intense | 0.9 | False |
+| Adversarial: High-Energy Sad Blues | blues | sad | 0.95 | False |
+
+The adversarial profile was designed to expose contradictory preferences — a user who wants very high-energy music but in a typically slow/quiet genre (blues) with a sad mood.
+
+### Weight-shift experiment (Step 3)
+
+Changed `recommender.py` scoring:
+- **Energy weight doubled**: `energy_score = 2 * (1 - |target - song.energy|)` (max 2.0 instead of 1.0)
+- **Genre bonus halved**: `genre_bonus = 1.0` if match (was 2.0)
+- Total max score stays at 5.0 — math remains valid
+
+**Result:** For the adversarial profile, the winning margin for "Devil Got My Blues" shrank from **1.59 points → 0.02 points** over the next best song. High-energy songs nearly overtook it, confirming the original genre bonus was masking energy mismatches. For the Chill Lofi profile, "Spacewalk Thoughts" rose from #4 to #3 because its mood match became proportionally more valuable relative to the smaller genre bonus.
 
 ---
 
 ## Limitations and Risks
 
-Summarize some limitations of your recommender.
+- **Genre lock-in**: The genre bonus (originally 2.0 out of 5.0 max) is so large it can override every other preference. The adversarial test proved this: a user asking for energy 0.95 received a song with energy 0.38 simply because it matched genre and mood.
+- **Catalog too small**: 20 songs means most genres have exactly one representative. Once the genre bonus is awarded, the winner is nearly predetermined.
+- **Missing features**: `valence`, `danceability`, and `tempo_bpm` are stored in the CSV but never used in scoring. A dance track and a ballad with the same energy level score identically.
+- **Binary acoustic preference**: No middle ground — users who enjoy both acoustic and electronic sounds are forced to pick a side.
+- **Exact mood matching only**: "chill" and "laid-back" are treated as completely different, even though a listener would likely enjoy both.
 
-Examples:
-
-- It only works on a tiny catalog
-- It does not understand lyrics or language
-- It might over favor one genre or mood
-
-You will go deeper on this in your model card.
+See [model_card.md](model_card.md) for a deeper analysis.
 
 ---
 
