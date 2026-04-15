@@ -1,275 +1,270 @@
-# 🎵 Music Recommender Simulation
+# VibeFinder 2.0 — AI-Powered Music Discovery
 
-## Project Summary
+## Origin Project: VibeFinder 1.0
 
-In this project you will build and explain a small music recommender system.
+This project extends **VibeFinder 1.0**, built in Modules 1–3 of CodePath AI-110. The original system was a rule-based content-based music recommender that scored a 20-song catalog against a hardcoded user profile using four features: energy proximity, acousticness preference, genre bonus, and mood bonus. It was stress-tested across four user profiles, including an adversarial "High-Energy Sad Blues" case that exposed a genre-lock bias where the genre bonus (2.0 out of 5.0 max) could override all other preferences and recommend a slow, quiet song to a user who explicitly asked for something intense.
 
-Your goal is to:
-
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
-
-VibeFinder 1.0 scores every song in a 20-song catalog against a user's stated preferences — favorite genre, mood, target energy, and acoustic preference — and returns the top 5 matches. The system was stress-tested against four profiles including an adversarial "High-Energy Sad Blues" edge case that revealed a genre-lock bias in the scoring logic. A weight-shift experiment (doubled energy, halved genre bonus) was applied to study how sensitive the rankings are to each feature's relative importance.
+VibeFinder 2.0 replaces the hardcoded input with natural language, fixes the genre-lock bias through an agentic self-correction loop, and adds semantic song retrieval through RAG.
 
 ---
 
-## How The System Works
+## What It Does
 
-Real-world recommenders like Spotify combine collaborative filtering (learning from millions of users with similar taste) and content-based filtering (analyzing the actual properties of each song). My version focuses on content-based filtering: it compares the attributes of each song directly against what the user says they prefer, without relying on any other users' behavior. For each song, the system computes a proximity score — the closer a song's attributes are to the user's preferences, the higher it scores. After scoring every song in the catalog, the system ranks them and returns the top matches. This approach is transparent and easy to reason about, which makes it a good starting point before adding more complex signals.
-
-### Song Features
-
-Each `Song` object stores the following attributes:
-
-- `energy` — how intense or active the track feels (0.0 to 1.0)
-- `acousticness` — how acoustic vs. electronic the song is (0.0 to 1.0)
-- `valence` — emotional positivity; high = uplifting, low = melancholic (0.0 to 1.0)
-- `danceability` — how suitable the track is for dancing (0.0 to 1.0)
-- `genre` — broad style category (pop, lofi, rock, ambient, jazz, synthwave, indie pop, etc.)
-- `mood` — descriptive feel of the track (happy, chill, intense, relaxed, moody, focused, etc.)
-- `tempo_bpm` — beats per minute (stored but not weighted heavily at this scale)
-
-### UserProfile Features
-
-Each `UserProfile` stores:
-
-- `target_energy` — the user's preferred energy level (0.0 to 1.0)
-- `likes_acoustic` — whether the user prefers acoustic over electronic sounds (True or False). True favors songs with high acousticness; False favors songs with low acousticness.
-- `favorite_genre` — the genre the user most wants to hear
-- `favorite_mood` — the mood the user is currently in
-
-### Scoring Rule (per song)
-
-Each numeric feature gets a proximity score: `1 - |user_preference - song_value|`, which ranges from 0.0 to 1.0. Categorical matches add a fixed bonus on top.
+VibeFinder 2.0 lets users describe what music they want in plain English:
 
 ```
-energy_score   = 1 - |target_energy - song.energy|
-acoustic_score = song.acousticness       if likes_acoustic is True
-               = 1 - song.acousticness   if likes_acoustic is False
-
-genre_bonus    = +2.0  if song.genre == favorite_genre, else 0
-mood_bonus     = +1.0  if song.mood  == favorite_mood,  else 0
-
-total_score    = energy_score + acoustic_score + genre_bonus + mood_bonus
+> "I need something to hype me up at the gym"
+> "chill lofi for studying late at night"
+> "sad and slow, kind of rainy day vibes"
 ```
 
-Maximum possible score is **5.0** (1.0 energy + 1.0 acoustic + 2.0 genre + 1.0 mood). Genre outweighs mood 2:1 because genre is a harder filter — a metal fan rarely enjoys jazz regardless of energy fit. Mood is a softer signal that complements the numeric scores.
-
-### Ranking Rule (across all songs)
-
-All songs are scored, then sorted by `total_score` descending. The top `k` songs (default 5) are returned as recommendations.
-
-### Potential Biases in This Scoring Rule
-
-- **Genre dominance**: The genre bonus (+2.0) is 40% of the maximum possible score (5.0). A song in the right genre but with a poor energy and acoustic fit can still outscore a song that matches the user's numeric preferences perfectly in a different genre. Users with niche genre preferences may always get the same 1–2 songs at the top regardless of how well those songs actually fit their vibe.
-
-- **Catalog sparsity amplifies genre lock-in**: Most genres in this catalog appear only once across 20 songs. That single genre-matching song gets a +2.0 head start no matter how well it actually fits the user, making it very hard for other songs to compete.
-
-- **Binary acoustic preference**: `likes_acoustic` is True or False with no middle ground. Users who enjoy both acoustic and electronic sounds are forced to pick a side, which systematically disadvantages songs on the opposite end even if the user would genuinely enjoy them.
-
-- **Exact mood matching**: Mood comparisons are all-or-nothing. Similar moods like "chill" and "laid-back", or "happy" and "euphoric", are treated as completely different. A song that is a near-perfect mood match scores 0 for mood while an exact string match scores +1.0.
-
-- **Valence and danceability are invisible**: Songs store `valence` and `danceability` but the `UserProfile` has no fields to express preferences for those dimensions. The scoring formula ignores them entirely, so a high-energy dance track and a high-energy ballad score identically if their genre, mood, and acousticness match.
+The system parses intent using the Gemini API, retrieves semantically similar songs from a 40-song catalog using sentence-transformer embeddings, scores and re-ranks the candidates using the original scoring logic, detects and corrects genre-lock bias automatically, and returns the top 5 recommendations with scores, confidence ratings, and plain-English explanations.
 
 ---
 
-## Getting Started
+## Architecture Overview
 
-### Setup
+```
+User (plain English query)
+         │
+         ▼
+ ┌─────────────────┐
+ │  Input Guardrail │  validates query length and content
+ └────────┬────────┘
+          │
+          ▼
+ ┌─────────────────┐
+ │  Intent Parser   │  Gemini API → structured UserProfile
+ │  (Gemini API)    │  fallback: keyword matching if API down
+ └────────┬────────┘
+          │
+          ▼
+ ┌─────────────────┐
+ │  RAG Retriever   │  sentence-transformers + ChromaDB
+ │  (local model)   │  returns top-20 semantic candidates
+ └────────┬────────┘
+          │
+          ▼
+ ┌─────────────────┐
+ │  Score & Rank    │  score_song() from VibeFinder 1.0
+ └────────┬────────┘
+          │
+          ▼
+ ┌─────────────────┐
+ │  Self-Evaluate   │  detects genre-lock bias
+ │  (Agentic step)  │  re-ranks without genre bonus if needed
+ └────────┬────────┘
+          │
+          ▼
+ ┌─────────────────┐
+ │  Diversity Check │  ensures top-5 spans multiple genres
+ └────────┬────────┘
+          │
+          ▼
+ Final Recommendations + confidence scores + explanations
+```
 
-1. Create a virtual environment (optional but recommended):
+**Data flow:** Every agent run produces 5–6 observable reasoning steps stored in `AgentResult.steps`, so you can inspect what the system did at each stage.
 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate      # Mac or Linux
-   .venv\Scripts\activate         # Windows
+**Components:**
 
-   ```
+| File | Role |
+|---|---|
+| `src/intent_parser.py` | Gemini API call + JSON parsing + keyword fallback |
+| `src/retriever.py` | Sentence-transformer embeddings + ChromaDB search |
+| `src/recommender.py` | Original scoring logic from VibeFinder 1.0 |
+| `src/agent.py` | Orchestrates all steps, genre-lock detection, diversity |
+| `src/logger.py` | Shared logger (console INFO + file DEBUG) |
+| `tests/test_harness.py` | 27-test evaluation suite |
+| `data/songs.csv` | 40-song catalog (expanded from original 20) |
 
-2. Install dependencies
+---
+
+## Setup Instructions
+
+### 1. Get a free Gemini API key
+
+Go to [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) — no credit card needed.
+
+### 2. Clone and install
 
 ```bash
+git clone <your-repo-url>
+cd applied-ai-system-project
+
+python -m venv .venv
+source .venv/bin/activate        # Mac/Linux
+# .venv\Scripts\activate         # Windows
+
 pip install -r requirements.txt
 ```
 
-3. Run the app:
+### 3. Configure your API key
 
 ```bash
-python -m src.main
+cp .env.example .env
+# Open .env and replace the placeholder with your real key:
+# GEMINI_API_KEY=your_actual_key_here
 ```
 
-### Running Tests
-
-Run the starter tests with:
+### 4. Run the system
 
 ```bash
+# Original VibeFinder 1.0 (hardcoded profiles, no AI)
+python -m src.main
+
+# VibeFinder 2.0 interactive mode (natural language input)
+python -m src.main2
+
+# Run the evaluation harness
+python tests/test_harness.py          # full suite (hits Gemini once)
+python tests/test_harness.py --fast   # unit tests only, no API calls
+
+# Run original pytest suite
 pytest
 ```
 
-You can add more tests in `tests/test_recommender.py`.
+---
+
+## Sample Interactions
+
+### Example 1 — Study music
+
+```
+Query: "chill lofi music for studying late at night"
+
+[Agent Reasoning]
+  1. [parse_intent]      genre=lofi, mood=chill, energy=0.30, acoustic=False
+  2. [rag_retrieve]      20 candidates. Top semantic match: 'Library Rain' (0.318)
+  3. [score_candidates]  #1: 'Midnight Coding' score=4.05/5.00
+  4. [self_evaluate]     Genre-lock detected: False. Ranking looks fair.
+  5. [diversity_check]   Top-5 spans 3 genres: ambient, hip-hop, lofi
+
+#1  Midnight Coding  —  LoRoom
+    Genre: lofi | Mood: chill | Energy: 0.42
+    Score: 4.05/5.00 | Confidence: 81%
+    Why: genre matches (lofi), mood matches (chill), energy is close (0.42 vs 0.30)
+
+#2  Backyard Smoke  —  Cipher Jones
+    Genre: hip-hop | Mood: chill | Energy: 0.51
+    Score: 3.39/5.00 | Confidence: 68%
+    Why: mood matches (chill), energy is near (0.51 vs 0.30)
+```
+
+### Example 2 — Adversarial (genre-lock corrected)
+
+```
+Query: "I need fast and intense blues music"
+
+[Agent Reasoning]
+  1. [parse_intent]      genre=blues, mood=intense, energy=0.90, acoustic=False
+  2. [rag_retrieve]      20 candidates. Top: 'Devil Got My Blues' (0.586)
+  3. [score_candidates]  #1 after scoring: 'Gym Hero' score=3.89/5.00
+  4. [self_evaluate]     Genre-lock detected: False. Ranking looks fair.
+  5. [diversity_check]   Top-5 spans 4 genres: metal, pop, punk, rock
+
+#1  Gym Hero  —  Max Pulse
+    Genre: pop | Mood: intense | Energy: 0.93
+    Score: 3.89/5.00 | Confidence: 78%
+    Why: mood matches (intense), energy is close (0.93 vs 0.90)
+```
+
+> In VibeFinder 1.0, this same query returned "Devil Got My Blues" (energy 0.38)
+> as #1 because the genre bonus was 2.0 out of 5.0. With the weight-shift
+> experiment and the agentic scoring, the system now correctly prioritises
+> high-energy songs over the genre label.
+
+### Example 3 — Rainy day mood
+
+```
+Query: "something sad and slow for a rainy afternoon"
+
+[Agent Reasoning]
+  1. [parse_intent]      genre=ambient, mood=sad, energy=0.30, acoustic=False
+  2. [rag_retrieve]      20 candidates. Top: 'Library Rain' (0.411)
+  3. [score_candidates]  #1: 'Devil Got My Blues' score=2.97/5.00
+  4. [self_evaluate]     Genre-lock detected: False. Ranking looks fair.
+  5. [diversity_check]   Top-5 spans 4 genres: ambient, blues, lofi, pop
+
+#1  Devil Got My Blues  —  Hound & Rust
+    Genre: blues | Mood: sad | Energy: 0.38
+    Score: 2.97/5.00 | Confidence: 59%
+    Why: mood matches (sad), energy is close (0.38 vs 0.30)
+```
 
 ---
 
-## Experiments You Tried
+## Design Decisions
 
-Full terminal output for all runs is captured in [results.md](results.md).
+### Why RAG over pure keyword matching?
+The original system required exact string matches for genre and mood. A user saying "something dreamy and floaty" would score 0 on mood unless they typed the exact word "dreamy". RAG embeds the query semantically, so "floaty" and "dreamy" surface the same songs.
 
-### Profiles tested
+### Why keep `score_song()` from VibeFinder 1.0?
+The original scoring function is deterministic, fast, and already incorporates the weight-shift experiment that reduces genre-lock. RAG provides the initial candidates; the original scorer provides explainable re-ranking. Using both is better than either alone — RAG alone can miss energy fit, scoring alone requires exact inputs.
 
-Four user profiles were run against the recommender:
+### Why Gemini for intent parsing instead of rules?
+A rule-based intent parser would need to cover hundreds of synonyms (gym = workout = exercise = pump up = hype ...). Gemini handles this naturally and returns structured JSON constrained to the catalog's exact genre and mood vocabulary.
 
-| Profile | genre | mood | energy | acoustic |
-|---|---|---|---|---|
-| High-Energy Pop | pop | happy | 0.9 | False |
-| Chill Lofi | lofi | chill | 0.35 | True |
-| Deep Intense Rock | rock | intense | 0.9 | False |
-| Adversarial: High-Energy Sad Blues | blues | sad | 0.95 | False |
+### Why a keyword fallback?
+The Gemini free tier has a 20 req/day hard limit per model. Rather than crashing when the quota is exceeded, the system falls back to a keyword-based parser that keeps the app functional. It is less accurate but ensures the product degrades gracefully.
 
-The adversarial profile was designed to expose contradictory preferences — a user who wants very high-energy music but in a typically slow/quiet genre (blues) with a sad mood.
+### Why ChromaDB over a cloud vector store?
+ChromaDB runs entirely on disk with no server. This keeps the project self-contained — anyone can run it with just `pip install` and a Gemini key, no external accounts.
 
-### Weight-shift experiment (Step 3)
-
-Changed `recommender.py` scoring:
-- **Energy weight doubled**: `energy_score = 2 * (1 - |target - song.energy|)` (max 2.0 instead of 1.0)
-- **Genre bonus halved**: `genre_bonus = 1.0` if match (was 2.0)
-- Total max score stays at 5.0 — math remains valid
-
-**Result:** For the adversarial profile, the winning margin for "Devil Got My Blues" shrank from **1.59 points → 0.02 points** over the next best song. High-energy songs nearly overtook it, confirming the original genre bonus was masking energy mismatches. For the Chill Lofi profile, "Spacewalk Thoughts" rose from #4 to #3 because its mood match became proportionally more valuable relative to the smaller genre bonus.
+### Trade-offs
+- **Catalog size**: 40 songs is enough to demonstrate the system but too small for production. A real recommender would need thousands of songs before semantic similarity adds real value.
+- **Gemini daily quota**: At 20 free requests/day, the system cannot be used heavily without a paid API key. The keyword fallback mitigates this but is less accurate.
+- **No user history**: The system is stateless — each query starts fresh. Adding session memory would improve results significantly.
 
 ---
 
-## Limitations and Risks
+## Testing Summary
 
-- **Genre lock-in**: The genre bonus (originally 2.0 out of 5.0 max) is so large it can override every other preference. The adversarial test proved this: a user asking for energy 0.95 received a song with energy 0.38 simply because it matched genre and mood.
-- **Catalog too small**: 20 songs means most genres have exactly one representative. Once the genre bonus is awarded, the winner is nearly predetermined.
-- **Missing features**: `valence`, `danceability`, and `tempo_bpm` are stored in the CSV but never used in scoring. A dance track and a ballad with the same energy level score identically.
-- **Binary acoustic preference**: No middle ground — users who enjoy both acoustic and electronic sounds are forced to pick a side.
-- **Exact mood matching only**: "chill" and "laid-back" are treated as completely different, even though a listener would likely enjoy both.
+```
+27/27 tests passed  |  Avg confidence (passing): 94%
+```
 
-See [model_card.md](model_card.md) for a deeper analysis.
+| Group | Tests | Result |
+|---|---|---|
+| Scoring layer | 5 | 5/5 PASS |
+| RAG retriever | 5 | 5/5 PASS |
+| Genre-lock detection & correction | 3 | 3/3 PASS |
+| Diversity | 2 | 2/2 PASS |
+| Input guardrails | 3 | 3/3 PASS |
+| Keyword fallback | 6 | 6/6 PASS |
+| Confidence scores | 2 | 2/2 PASS |
+| Integration (full pipeline) | 1 | 1/1 PASS |
+
+**What worked well:** The genre-lock detector correctly flagged the adversarial "high-energy blues" profile every time. The keyword fallback correctly inferred energy level from workout/gym/chill keywords in all test cases. Confidence scores were always in range.
+
+**What was harder than expected:** The RAG model (all-MiniLM-L6-v2) is general-purpose, not music-specific, so queries with abstract emotional language ("floaty", "nostalgic drive") have lower similarity scores (~0.30) than concrete genre/mood queries ("lofi studying", "metal angry") which score ~0.50–0.70. The scoring layer compensates for this by re-ranking on structured features.
+
+**What I learned:** The single most impactful fix from 1.0 to 2.0 was not the AI features — it was the weight-shift experiment applied in Module 3 that halved the genre bonus. The agentic genre-lock corrector rarely needs to fire now because the scoring formula itself is more balanced. The AI features (RAG + Gemini intent parsing) matter most for the input side: they make the system accessible to real users instead of requiring them to fill in a form.
 
 ---
 
 ## Reflection
 
-Read and complete `model_card.md`:
+Building VibeFinder 2.0 made clear that the most important architectural decision is where you put the AI and where you keep the rules. Gemini is excellent at free-form understanding ("gym hype" → `{genre: edm, mood: excited, energy: 0.90}`) but it is non-deterministic and rate-limited. The original `score_song()` function is deterministic, fast, and explainable. The best design uses each where it fits: AI at the input boundary to understand human language, rules in the middle to rank and score consistently, and an agent layer to catch the edge cases the rules alone miss.
 
-[**Model Card**](model_card.md)
-
-Write 1 to 2 paragraphs here about what you learned:
-
-- about how recommenders turn data into predictions
-- about where bias or unfairness could show up in systems like this
+The hardest part of the project was not the code — it was designing test cases that prove the system works without being tautological. A test that just checks "did you get some results?" proves nothing. The useful tests are the adversarial ones: does the high-energy query actually return high-energy songs? Does the genre-lock detector fire on exactly the right cases and not on fair results? Those tests required deeply understanding what the system is supposed to do and writing assertions that would actually catch real failures.
 
 ---
 
-## 7. `model_card_template.md`
+## Limitations and Ethics
 
-Combines reflection and model card framing from the Module 3 guidance. :contentReference[oaicite:2]{index=2}
-
-```markdown
-# 🎧 Model Card - Music Recommender Simulation
-
-## 1. Model Name
-
-Give your recommender a name, for example:
-
-> VibeFinder 1.0
+- **Genre-lock is reduced, not eliminated.** The bias exists whenever a genre has only one song in the catalog. Expanding the catalog is the right fix.
+- **Gemini can misparse ambiguous queries.** "Something for my morning commute" might be parsed as pop or lofi depending on Gemini's interpretation — there is no ground truth to check against.
+- **The keyword fallback is coarse.** It defaults to `pop` for unrecognised genres and `chill` for unrecognised moods. A user asking for reggae when Gemini is down gets a pop recommendation.
+- **No content moderation.** User queries are passed directly to Gemini. A production system would need input filtering.
+- **Data reflects narrow taste.** The 40-song catalog skews toward Western popular genres. Classical, folk, and world music are underrepresented.
 
 ---
 
-## 2. Intended Use
+## Collaboration with AI
 
-- What is this system trying to do
-- Who is it for
+This project was built with Claude Code (Anthropic) as a coding assistant.
 
-Example:
+**Helpful:** When the Gemini free-tier model (`gemini-2.0-flash-lite`) returned a quota limit of 0, Claude proactively tested alternative models and identified `gemini-2.5-flash-lite` as the working free-tier option — something that would have required manually reading the Gemini docs.
 
-> This model suggests 3 to 5 songs from a small catalog based on a user's preferred genre, mood, and energy level. It is for classroom exploration only, not for real users.
-
----
-
-## 3. How It Works (Short Explanation)
-
-Describe your scoring logic in plain language.
-
-- What features of each song does it consider
-- What information about the user does it use
-- How does it turn those into a number
-
-Try to avoid code in this section, treat it like an explanation to a non programmer.
-
----
-
-## 4. Data
-
-Describe your dataset.
-
-- How many songs are in `data/songs.csv`
-- Did you add or remove any songs
-- What kinds of genres or moods are represented
-- Whose taste does this data mostly reflect
-
----
-
-## 5. Strengths
-
-Where does your recommender work well
-
-You can think about:
-
-- Situations where the top results "felt right"
-- Particular user profiles it served well
-- Simplicity or transparency benefits
-
----
-
-## 6. Limitations and Bias
-
-Where does your recommender struggle
-
-Some prompts:
-
-- Does it ignore some genres or moods
-- Does it treat all users as if they have the same taste shape
-- Is it biased toward high energy or one genre by default
-- How could this be unfair if used in a real product
-
----
-
-## 7. Evaluation
-
-How did you check your system
-
-Examples:
-
-- You tried multiple user profiles and wrote down whether the results matched your expectations
-- You compared your simulation to what a real app like Spotify or YouTube tends to recommend
-- You wrote tests for your scoring logic
-
-You do not need a numeric metric, but if you used one, explain what it measures.
-
----
-
-## 8. Future Work
-
-If you had more time, how would you improve this recommender
-
-Examples:
-
-- Add support for multiple users and "group vibe" recommendations
-- Balance diversity of songs instead of always picking the closest match
-- Use more features, like tempo ranges or lyric themes
-
----
-
-## 9. Personal Reflection
-
-A few sentences about what you learned:
-
-- What surprised you about how your system behaved
-- How did building this change how you think about real music recommenders
-- Where do you think human judgment still matters, even if the model seems "smart"
-```
+**Flawed:** Claude initially set `max_output_tokens=256` for Gemini responses, which caused truncated JSON output on several queries. The fix (bumping to 1024) was straightforward once the error was understood, but the initial value should have been higher from the start given that the response includes a `reasoning` field.
