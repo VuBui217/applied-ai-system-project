@@ -29,6 +29,10 @@ import transformers
 transformers.logging.set_verbosity_error()
 from sentence_transformers import SentenceTransformer
 
+from src.logger import get_logger
+
+log = get_logger(__name__)
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -39,7 +43,9 @@ _COLLECTION_NAME = "vibefinder_songs"
 # ---------------------------------------------------------------------------
 # Model (loaded once at import time so it is not reloaded on every call)
 # ---------------------------------------------------------------------------
+log.debug("Loading sentence-transformer model (all-MiniLM-L6-v2)...")
 _model = SentenceTransformer("all-MiniLM-L6-v2")
+log.debug("Model loaded.")
 
 
 def _energy_label(e: float) -> str:
@@ -116,6 +122,11 @@ def build_index(songs: List[Dict]) -> None:
     Embed all songs and upsert them into the ChromaDB collection.
     Safe to call multiple times — existing entries are overwritten, not duplicated.
     """
+    if not songs:
+        log.warning("build_index called with empty song list — skipping.")
+        return
+
+    log.info("Building ChromaDB index for %d songs...", len(songs))
     client = _get_client()
     collection = client.get_or_create_collection(name=_COLLECTION_NAME)
 
@@ -142,6 +153,7 @@ def build_index(songs: List[Dict]) -> None:
             for s in songs
         ],
     )
+    log.info("Index built — %d songs upserted into ChromaDB.", len(songs))
 
 
 def retrieve(query: str, k: int = 10) -> List[Dict]:
@@ -159,10 +171,13 @@ def retrieve(query: str, k: int = 10) -> List[Dict]:
     -------
     List of song metadata dicts, ordered by semantic similarity (closest first).
     """
+    log.debug("RAG retrieve: query=%r  k=%d", query, k)
+
     client = _get_client()
     collection = client.get_or_create_collection(name=_COLLECTION_NAME)
 
     if collection.count() == 0:
+        log.error("ChromaDB collection is empty — index has not been built.")
         raise RuntimeError(
             "ChromaDB collection is empty. Call build_index(songs) first."
         )
@@ -187,6 +202,10 @@ def retrieve(query: str, k: int = 10) -> List[Dict]:
         song["description"] = doc
         songs.append(song)
 
+    log.debug(
+        "Retrieved %d candidates. Top: '%s' (similarity=%.3f)",
+        len(songs), songs[0]["title"] if songs else "—", songs[0]["similarity"] if songs else 0,
+    )
     return songs
 
 

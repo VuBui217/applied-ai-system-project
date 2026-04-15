@@ -25,6 +25,9 @@ from typing import Dict, List, Tuple
 from src.intent_parser import parse_intent
 from src.retriever import build_index, retrieve
 from src.recommender import score_song
+from src.logger import get_logger
+
+log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -200,22 +203,34 @@ def run_agent(query: str, songs: List[Dict], k: int = 5) -> AgentResult:
     -------
     AgentResult with recommendations, observable steps, and bias flags.
     """
+    # ------------------------------------------------------------------
+    # Guardrail: validate user input before touching any API
+    # ------------------------------------------------------------------
+    query = query.strip()
+    if not query:
+        raise ValueError("Query cannot be empty. Please describe the music you want.")
+    if len(query) < 3:
+        raise ValueError(f"Query too short ({len(query)} chars). Please be more descriptive.")
+    if len(query) > 500:
+        log.warning("Query exceeds 500 chars — truncating to 500.")
+        query = query[:500]
+
+    log.info("Agent started for query: %r", query)
     steps: List[AgentStep] = []
 
     # ------------------------------------------------------------------
     # Step 1: Parse intent
     # ------------------------------------------------------------------
     profile = parse_intent(query)
-    steps.append(AgentStep(
-        name="parse_intent",
-        detail=(
-            f"Gemini extracted → genre={profile['favorite_genre']}, "
-            f"mood={profile['favorite_mood']}, "
-            f"energy={profile['target_energy']}, "
-            f"acoustic={profile['likes_acoustic']}. "
-            f"Reasoning: {profile.get('reasoning', 'n/a')}"
-        ),
-    ))
+    step1_detail = (
+        f"Gemini extracted → genre={profile['favorite_genre']}, "
+        f"mood={profile['favorite_mood']}, "
+        f"energy={profile['target_energy']}, "
+        f"acoustic={profile['likes_acoustic']}. "
+        f"Reasoning: {profile.get('reasoning', 'n/a')}"
+    )
+    steps.append(AgentStep(name="parse_intent", detail=step1_detail))
+    log.debug("[step1/parse_intent] %s", step1_detail)
 
     # ------------------------------------------------------------------
     # Step 2: RAG retrieval
@@ -224,14 +239,13 @@ def run_agent(query: str, songs: List[Dict], k: int = 5) -> AgentResult:
     candidates_raw = retrieve(query, k=n_retrieve)
     # retrieve() returns song dicts with extra keys (similarity, description)
     # score_song() only uses the standard song keys, so this is safe
-    steps.append(AgentStep(
-        name="rag_retrieve",
-        detail=(
-            f"Semantic search returned {len(candidates_raw)} candidates. "
-            f"Top match: '{candidates_raw[0]['title']}' "
-            f"(similarity={candidates_raw[0]['similarity']:.3f})"
-        ),
-    ))
+    step2_detail = (
+        f"Semantic search returned {len(candidates_raw)} candidates. "
+        f"Top match: '{candidates_raw[0]['title']}' "
+        f"(similarity={candidates_raw[0]['similarity']:.3f})"
+    )
+    steps.append(AgentStep(name="rag_retrieve", detail=step2_detail))
+    log.debug("[step2/rag_retrieve] %s", step2_detail)
 
     # ------------------------------------------------------------------
     # Step 3: Score candidates
@@ -239,26 +253,27 @@ def run_agent(query: str, songs: List[Dict], k: int = 5) -> AgentResult:
     scored = _score_all(profile, candidates_raw)
     top_title  = scored[0][0]["title"]
     top_score  = scored[0][1]
-    steps.append(AgentStep(
-        name="score_candidates",
-        detail=(
-            f"Scored {len(scored)} candidates. "
-            f"Current #1: '{top_title}' with score {top_score:.2f}/5.00."
-        ),
-    ))
+    step3_detail = (
+        f"Scored {len(scored)} candidates. "
+        f"Current #1: '{top_title}' with score {top_score:.2f}/5.00."
+    )
+    steps.append(AgentStep(name="score_candidates", detail=step3_detail))
+    log.debug("[step3/score_candidates] %s", step3_detail)
 
     # ------------------------------------------------------------------
     # Step 4: Self-evaluate for genre-lock
     # ------------------------------------------------------------------
     genre_locked, lock_reason = _detect_genre_lock(profile, scored)
     genre_lock_corrected = False
-    steps.append(AgentStep(
-        name="self_evaluate",
-        detail=(
-            f"Genre-lock detected: {genre_locked}. "
-            + (lock_reason if genre_locked else "Ranking looks fair.")
-        ),
-    ))
+    step4_detail = (
+        f"Genre-lock detected: {genre_locked}. "
+        + (lock_reason if genre_locked else "Ranking looks fair.")
+    )
+    steps.append(AgentStep(name="self_evaluate", detail=step4_detail))
+    if genre_locked:
+        log.warning("[step4/self_evaluate] Genre-lock detected — %s", lock_reason)
+    else:
+        log.debug("[step4/self_evaluate] %s", step4_detail)
 
     # ------------------------------------------------------------------
     # Step 5: Re-rank if genre-locked
@@ -266,14 +281,13 @@ def run_agent(query: str, songs: List[Dict], k: int = 5) -> AgentResult:
     if genre_locked:
         scored = _rerank_without_genre_lock(profile, candidates_raw)
         new_top = scored[0][0]["title"]
-        steps.append(AgentStep(
-            name="rerank",
-            detail=(
-                f"Genre bonus zeroed. New #1: '{new_top}' "
-                f"(score {scored[0][1]:.2f}/5.00). "
-                f"Re-ranking prioritises energy and mood fit."
-            ),
-        ))
+        step5_detail = (
+            f"Genre bonus zeroed. New #1: '{new_top}' "
+            f"(score {scored[0][1]:.2f}/5.00). "
+            f"Re-ranking prioritises energy and mood fit."
+        )
+        steps.append(AgentStep(name="rerank", detail=step5_detail))
+        log.info("[step5/rerank] %s", step5_detail)
         genre_lock_corrected = True
 
     # ------------------------------------------------------------------
@@ -281,13 +295,12 @@ def run_agent(query: str, songs: List[Dict], k: int = 5) -> AgentResult:
     # ------------------------------------------------------------------
     diverse_scored = _ensure_diversity(scored, k)
     genres_in_top = {s["genre"] for s, _ in diverse_scored}
-    steps.append(AgentStep(
-        name="diversity_check",
-        detail=(
-            f"Final top-{k} spans {len(genres_in_top)} genre(s): "
-            f"{', '.join(sorted(genres_in_top))}."
-        ),
-    ))
+    step6_detail = (
+        f"Final top-{k} spans {len(genres_in_top)} genre(s): "
+        f"{', '.join(sorted(genres_in_top))}."
+    )
+    steps.append(AgentStep(name="diversity_check", detail=step6_detail))
+    log.debug("[step6/diversity_check] %s", step6_detail)
 
     # ------------------------------------------------------------------
     # Build final Recommendation objects
@@ -302,6 +315,10 @@ def run_agent(query: str, songs: List[Dict], k: int = 5) -> AgentResult:
         for song, score in diverse_scored
     ]
 
+    log.info(
+        "Agent complete — %d recommendations. Genre-lock: detected=%s corrected=%s",
+        len(recommendations), genre_locked, genre_lock_corrected,
+    )
     return AgentResult(
         query=query,
         profile=profile,

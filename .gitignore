@@ -19,3 +19,7 @@ venv/
 
 # ChromaDB vector store (auto-generated, do not commit)
 data/chroma_db/
+
+# Log files
+logs/*.log
+logs/*.log.*

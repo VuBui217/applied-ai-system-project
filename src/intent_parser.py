@@ -29,7 +29,11 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from src.logger import get_logger
+
 load_dotenv()
+
+log = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Gemini client (created once)
@@ -92,6 +96,8 @@ def parse_intent(query: str) -> Dict:
     """
     Parse a plain-English music request into a structured UserProfile dict.
 
+    Falls back to keyword-based parsing if Gemini is unavailable after retries.
+
     Parameters
     ----------
     query : str
@@ -101,12 +107,9 @@ def parse_intent(query: str) -> Dict:
     -------
     dict with keys: favorite_genre, favorite_mood, target_energy,
                     likes_acoustic, reasoning
-
-    Raises
-    ------
-    ValueError  if Gemini returns something that cannot be parsed or contains
-                invalid field values.
     """
+    log.info("Parsing intent for query: %r", query)
+
     # Retry up to 3 times on transient server errors (503) or rate limits (429)
     last_error = None
     for attempt in range(3):
@@ -127,13 +130,17 @@ def parse_intent(query: str) -> Dict:
             err_str = str(exc)
             if "503" in err_str or "429" in err_str:
                 wait = 15 * (attempt + 1)   # 15s, 30s, 45s
+                log.warning(
+                    "Gemini %s on attempt %d — retrying in %ds...",
+                    "503" if "503" in err_str else "429", attempt + 1, wait,
+                )
                 time.sleep(wait)
             else:
+                log.error("Gemini non-retryable error: %s", exc)
                 raise   # non-retryable error — surface immediately
     else:
-        raise RuntimeError(
-            f"Gemini API failed after 3 attempts: {last_error}"
-        )
+        log.error("Gemini failed after 3 attempts — using keyword fallback.")
+        return _keyword_fallback(query)
 
     raw = response.text.strip()
 
@@ -150,11 +157,101 @@ def parse_intent(query: str) -> Dict:
     try:
         profile = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Gemini returned non-JSON output: {raw!r}"
-        ) from exc
+        log.warning("JSON parse failed — using keyword fallback. Raw: %r", raw[:80])
+        return _keyword_fallback(query)
 
-    _validate(profile)
+    try:
+        _validate(profile)
+    except ValueError as exc:
+        log.warning("Validation failed (%s) — using keyword fallback.", exc)
+        return _keyword_fallback(query)
+
+    log.info(
+        "Intent parsed → genre=%s, mood=%s, energy=%.2f, acoustic=%s",
+        profile["favorite_genre"], profile["favorite_mood"],
+        profile["target_energy"], profile["likes_acoustic"],
+    )
+    return profile
+
+
+def _keyword_fallback(query: str) -> Dict:
+    """
+    Guardrail: simple keyword-based profile builder used when Gemini is down.
+    Not as accurate as Gemini, but keeps the app functional.
+    """
+    q = query.lower()
+
+    # Energy
+    if any(w in q for w in ("intense", "pump", "hype", "workout", "gym", "fast", "hard", "heavy", "loud")):
+        energy = 0.90
+    elif any(w in q for w in ("upbeat", "dance", "party", "energetic", "run")):
+        energy = 0.80
+    elif any(w in q for w in ("chill", "relax", "calm", "study", "focus", "sleep", "soft", "quiet")):
+        energy = 0.30
+    elif any(w in q for w in ("sad", "slow", "mellow", "melancholic", "rainy")):
+        energy = 0.35
+    else:
+        energy = 0.60
+
+    # Mood
+    if any(w in q for w in ("happy", "joy", "upbeat", "party")):
+        mood = "happy"
+    elif any(w in q for w in ("sad", "cry", "melancholic", "heartbreak")):
+        mood = "sad"
+    elif any(w in q for w in ("angry", "rage", "mad", "aggressive")):
+        mood = "angry"
+    elif any(w in q for w in ("chill", "relax", "calm")):
+        mood = "chill"
+    elif any(w in q for w in ("focus", "study", "concentrate", "work")):
+        mood = "focused"
+    elif any(w in q for w in ("intense", "hype", "pump")):
+        mood = "intense"
+    elif any(w in q for w in ("peaceful", "sleep", "meditat")):
+        mood = "peaceful"
+    elif any(w in q for w in ("confident", "power", "motivat")):
+        mood = "confident"
+    else:
+        mood = "chill"
+
+    # Genre
+    if any(w in q for w in ("metal", "heavy metal")):
+        genre = "metal"
+    elif any(w in q for w in ("rock",)):
+        genre = "rock"
+    elif any(w in q for w in ("jazz",)):
+        genre = "jazz"
+    elif any(w in q for w in ("lofi", "lo-fi", "lo fi")):
+        genre = "lofi"
+    elif any(w in q for w in ("classical", "orchestra", "piano")):
+        genre = "classical"
+    elif any(w in q for w in ("hip hop", "hip-hop", "rap", "trap")):
+        genre = "hip-hop"
+    elif any(w in q for w in ("pop",)):
+        genre = "pop"
+    elif any(w in q for w in ("folk", "acoustic", "guitar")):
+        genre = "folk"
+    elif any(w in q for w in ("edm", "electronic", "dance")):
+        genre = "edm"
+    elif any(w in q for w in ("ambient",)):
+        genre = "ambient"
+    elif any(w in q for w in ("latin",)):
+        genre = "latin"
+    elif any(w in q for w in ("blues",)):
+        genre = "blues"
+    else:
+        genre = "pop"
+
+    # Acoustic
+    acoustic = any(w in q for w in ("acoustic", "unplugged", "guitar", "piano", "organic", "natural"))
+
+    profile = {
+        "favorite_genre": genre,
+        "favorite_mood":  mood,
+        "target_energy":  energy,
+        "likes_acoustic": acoustic,
+        "reasoning":      "[Keyword fallback — Gemini unavailable]",
+    }
+    log.info("Keyword fallback profile: %s", profile)
     return profile
 
 
