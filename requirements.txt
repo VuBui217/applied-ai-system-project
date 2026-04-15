@@ -1,3 +1,13 @@
+# Core
 pandas
 pytest
-streamlit
+
+# Gemini API (new SDK)
+google-genai>=1.0.0
+
+# RAG / Embeddings
+sentence-transformers>=3.0.0
+chromadb>=0.5.0
+
+# Utilities
+python-dotenv>=1.0.0

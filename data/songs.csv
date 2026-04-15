@@ -19,3 +19,23 @@ id,title,artist,genre,mood,energy,tempo_bpm,valence,danceability,acousticness
 18,Moonlit Sonata,Clara Voss,classical,peaceful,0.24,72,0.69,0.32,0.97
 19,Block by Block,Cipher Jones,hip-hop,confident,0.78,98,0.66,0.85,0.12
 20,Golden Hour Soul,Velvet Ray,soul,warm,0.61,102,0.87,0.72,0.53
+21,Neon Carnival,Prism Kids,pop,excited,0.88,126,0.92,0.87,0.07
+22,Glass Half Empty,Rainy Palms,pop,melancholic,0.54,105,0.32,0.58,0.42
+23,Ember Glow,The Hollow West,rock,nostalgic,0.67,112,0.62,0.59,0.28
+24,Thunder March,Dreadwall,rock,angry,0.94,160,0.29,0.54,0.06
+25,Late Night Sketch,LoRoom,lofi,focused,0.33,70,0.51,0.49,0.83
+26,Dream Static,Paper Lanterns,lofi,dreamy,0.25,65,0.58,0.38,0.90
+27,Uptown Swing,Slow Stereo,jazz,happy,0.72,132,0.89,0.80,0.76
+28,Void Walker,Orbit Bloom,ambient,moody,0.19,52,0.21,0.26,0.96
+29,Chrome City,Neon Echo,synthwave,confident,0.85,120,0.73,0.81,0.09
+30,Frequency Drop,Ultrawave,edm,intense,0.98,150,0.64,0.96,0.02
+31,Soft Spoken,Soul Aria,r&b,romantic,0.49,88,0.81,0.67,0.57
+32,City Lights,Cipher Jones,hip-hop,confident,0.81,105,0.71,0.89,0.08
+33,Backyard Smoke,Cipher Jones,hip-hop,chill,0.51,88,0.67,0.75,0.19
+34,Wildfire Heart,Dusty Hollow,country,happy,0.79,120,0.86,0.76,0.58
+35,Winter Hymn,The Maren,folk,peaceful,0.27,60,0.56,0.34,0.93
+36,Shattered Crown,Voltline,punk,angry,0.96,164,0.38,0.64,0.04
+37,Papel Picado,Calor Trio,latin,excited,0.87,130,0.93,0.92,0.21
+38,Fade to Blue,Indigo Parade,indie pop,melancholic,0.57,100,0.37,0.54,0.48
+39,Sakura Drive,Clara Voss,classical,peaceful,0.44,85,0.74,0.39,0.95
+40,Sunset Trap,Cipher Jones,trap,confident,0.83,140,0.68,0.90,0.06
