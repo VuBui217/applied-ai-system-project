@@ -35,7 +35,7 @@ load_dotenv()
 # Gemini client (created once)
 # ---------------------------------------------------------------------------
 _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-_MODEL = "gemini-2.5-flash"   # free-tier model, fast and capable
+_MODEL = "gemini-2.5-flash-lite"   # free-tier model, fast and capable
 
 # ---------------------------------------------------------------------------
 # Valid catalog values — Gemini must pick from these so scores are meaningful
