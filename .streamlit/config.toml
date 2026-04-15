@@ -1,0 +1,5 @@
+[server]
+fileWatcherType = "none"   # stops Streamlit scanning third-party packages
+
+[browser]
+gatherUsageStats = false
